@@ -17,8 +17,7 @@ impl EventHandler for Handler {
 	async fn message(&self, _ctx: Context, msg: Message) {
 		if msg.channel_id == self.channel {
 			self.http_client.get(self.tshock_url.as_str())
-				.query(&["token", self.tshock_token.as_str()])
-				.query(&["msg", msg.content.as_str()])
+				.query(&[("token", self.tshock_token.as_str()), ("msg", msg.content.as_str())])
 				.send().await.unwrap();
 			// TODO: handle error
 		}
