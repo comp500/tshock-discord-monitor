@@ -19,7 +19,7 @@ impl EventHandler for Handler {
 			self.http_client.get(self.tshock_url.as_str())
 				.query(&["token", self.tshock_token.as_str()])
 				.query(&["msg", msg.content.as_str()])
-				.send().await;
+				.send().await.unwrap();
 			// TODO: handle error
 		}
 	}
