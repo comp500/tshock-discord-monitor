@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serenity = "0.9.0-rc.0"
+serenity = { version = "0.9.0-rc.0", default-features = false, features = ["builder", "cache", "collector", "client", "gateway", "http", "model", "utils", "native_tls_backend"] }
 config = { version = "0.10.1", features = ["toml"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
