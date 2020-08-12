@@ -110,7 +110,12 @@ impl EventHandler for Handler {
 				if list_changed || first_run {
 					// Set the user activity
 					ctx.set_activity(Activity::playing(
-						format!("Terraria {}/{}", player_list.len(), status.maxplayers).as_str(),
+						format!(
+							"Terraria: {}/{} online",
+							player_list.len(),
+							status.maxplayers
+						)
+						.as_str(),
 					))
 					.await;
 					// Set the channel topic
@@ -135,20 +140,22 @@ impl EventHandler for Handler {
 	}
 
 	async fn message(&self, ctx: Context, msg: Message) {
-		// On every message, broadcast to Terraria
-		if msg.channel_id == self.channel {
-			let username = msg.author_nick(ctx).await.unwrap_or(msg.author.name);
-			self.http_client
-				.get(self.tshock_url.join("v2/server/broadcast").unwrap())
-				.query(&[
-					("token", self.tshock_token.as_str()),
-					("msg", format!("({}) {}", username, msg.content).as_str()),
-				])
-				.send()
-				.await
-				.unwrap();
-			// TODO: handle error
+		if msg.channel_id != self.channel || msg.author.bot {
+			return;
 		}
+
+		// On every message, broadcast to Terraria
+		let username = msg.author_nick(ctx).await.unwrap_or(msg.author.name);
+		self.http_client
+			.get(self.tshock_url.join("v2/server/broadcast").unwrap())
+			.query(&[
+				("token", self.tshock_token.as_str()),
+				("msg", format!("({}) {}", username, msg.content).as_str()),
+			])
+			.send()
+			.await
+			.unwrap();
+		// TODO: handle error
 	}
 }
 
