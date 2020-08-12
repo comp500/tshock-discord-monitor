@@ -52,8 +52,9 @@ impl EventHandler for Handler {
 			let mut player_list = HashSet::new();
 			let mut removed_players = vec![];
 
-			// Every 30 seconds...
-			let mut interval = tokio::time::interval(Duration::from_secs(30));
+			// Every 20 seconds...
+			// TODO: make this configurable
+			let mut interval = tokio::time::interval(Duration::from_secs(20));
 			let mut first_run = true;
 			loop {
 				// Query the current player list, send messages when players leave/join
