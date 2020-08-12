@@ -54,6 +54,7 @@ impl EventHandler for Handler {
 
 			// Every 30 seconds...
 			let mut interval = tokio::time::interval(Duration::from_secs(30));
+			let mut first_run = true;
 			loop {
 				// Query the current player list, send messages when players leave/join
 				// TODO: better error handling
@@ -106,7 +107,7 @@ impl EventHandler for Handler {
 					list_changed = true;
 				}
 
-				if list_changed {
+				if list_changed || first_run {
 					// Set the user activity
 					ctx.set_activity(Activity::playing(
 						format!("Terraria {}/{}", player_list.len(), status.maxplayers).as_str(),
@@ -127,6 +128,7 @@ impl EventHandler for Handler {
 						.unwrap();
 				}
 
+				first_run = false;
 				interval.tick().await;
 			}
 		});
