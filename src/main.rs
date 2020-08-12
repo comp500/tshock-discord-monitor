@@ -24,6 +24,11 @@ struct Player {
 	username: String
 }
 
+#[derive(Debug, Deserialize)]
+struct PlayerList {
+	players: Vec<Player>
+}
+
 #[async_trait]
 impl EventHandler for Handler {
 	async fn ready(&self, ctx: Context, _data_about_bot: Ready) {
@@ -48,18 +53,18 @@ impl EventHandler for Handler {
 				// TODO: better error handling
 				let new_player_list = http_client.get(tshock_url.join("v2/players/list").unwrap())
 					.query(&[("token", tshock_token.as_str())])
-					.send().await.unwrap().json::<Vec<Player>>().await.unwrap();
+					.send().await.unwrap().json::<PlayerList>().await.unwrap();
 				
 				let mut list_changed = false;
 				
-				for added_player in new_player_list.iter().filter(|p| player_list.insert(p.username.clone())) {
+				for added_player in new_player_list.players.iter().filter(|p| player_list.insert(p.username.clone())) {
 					// TODO: better error handling
 					channel.say(&ctx, format!("{} joined the game", added_player.username.clone())).await.unwrap();
 					list_changed = true;
 				}
 
 				player_list.retain(|player_name| {
-					if !new_player_list.iter().any(|new_p| new_p.username == *player_name) {
+					if !new_player_list.players.iter().any(|new_p| new_p.username == *player_name) {
 						removed_players.push(player_name.clone());
 						return false;
 					}
