@@ -46,7 +46,7 @@ impl EventHandler for Handler {
 			loop {
 				// Query the current player list, send messages when players leave/join
 				// TODO: better error handling
-				let new_player_list = http_client.get(tshock_url.join("v2/server/status").unwrap())
+				let new_player_list = http_client.get(tshock_url.join("v2/players/list").unwrap())
 					.query(&[("token", tshock_token.as_str())])
 					.send().await.unwrap().json::<Vec<Player>>().await.unwrap();
 				
