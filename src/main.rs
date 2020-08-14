@@ -114,10 +114,7 @@ impl EventHandler for Handler {
 					.filter(|p| player_list.insert(p.username.clone()))
 				{
 					if let Err(err) = channel
-						.say(
-							&ctx,
-							format!("{} joined the game", added_player.username.clone()),
-						)
+						.say(&ctx, format!("{} joined the game", added_player.username.clone()))
 						.await
 					{
 						eprintln!("Failed to send join message: {:?}", err);
@@ -125,11 +122,7 @@ impl EventHandler for Handler {
 				}
 
 				player_list.retain(|player_name| {
-					if !new_player_list
-						.players
-						.iter()
-						.any(|new_p| new_p.username == *player_name)
-					{
+					if !new_player_list.players.iter().any(|new_p| new_p.username == *player_name) {
 						removed_players.push(player_name.clone());
 						return false;
 					}
@@ -137,27 +130,17 @@ impl EventHandler for Handler {
 				});
 
 				for removed_player_name in removed_players.drain(..) {
-					if let Err(err) = channel
-						.say(&ctx, format!("{} left the game", removed_player_name))
-						.await
-					{
+					if let Err(err) = channel.say(&ctx, format!("{} left the game", removed_player_name)).await {
 						eprintln!("Failed to send leave message: {:?}", err);
 					}
 				}
 
-				if displayed_player_count == None
-					|| displayed_player_count != Some(player_list.len())
-				{
+				if displayed_player_count == None || displayed_player_count != Some(player_list.len()) {
 					displayed_player_count = Some(player_list.len());
 
 					// Set the user activity
 					ctx.set_activity(Activity::playing(
-						format!(
-							"Terraria: {}/{} online",
-							player_list.len(),
-							status.maxplayers
-						)
-						.as_str(),
+						format!("Terraria: {}/{} online", player_list.len(), status.maxplayers).as_str(),
 					))
 					.await;
 					// Set the channel topic
@@ -236,15 +219,9 @@ async fn main() {
 
 	let mut client = Client::new(settings.discord_token)
 		.event_handler(Handler {
-			channel: ChannelId(
-				settings
-					.discord_channel
-					.parse::<u64>()
-					.expect("Failed to parse channel ID"),
-			),
+			channel: ChannelId(settings.discord_channel.parse::<u64>().expect("Failed to parse channel ID")),
 			http_client: reqwest::Client::new(),
-			tshock_url: reqwest::Url::parse(settings.tshock_url.as_str())
-				.expect("Failed to TShock URL"),
+			tshock_url: reqwest::Url::parse(settings.tshock_url.as_str()).expect("Failed to TShock URL"),
 			tshock_token: settings.tshock_token,
 		})
 		.await
