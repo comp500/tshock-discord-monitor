@@ -2,7 +2,8 @@ use serenity::async_trait;
 use serenity::client::{Client, Context, EventHandler};
 use serenity::model::{channel::Message, id::ChannelId, prelude::*};
 
-use std::{collections::HashSet, env, time::Duration};
+use backoff::{future::FutureOperation as _, ExponentialBackoff};
+use std::{collections::HashSet, env, future::Future, time::Duration};
 
 use serde::Deserialize;
 
@@ -29,9 +30,39 @@ struct PlayerList {
 	players: Vec<Player>,
 }
 
+async fn check_tshock_status(
+	http_client: &reqwest::Client,
+	tshock_url: &reqwest::Url,
+	tshock_token: &String,
+) -> Result<WorldStatus, reqwest::Error> {
+	Ok(http_client
+		.get(tshock_url.join("v2/server/status").unwrap())
+		.query(&[("token", tshock_token.as_str())])
+		.send()
+		.await?
+		.json::<WorldStatus>()
+		.await?)
+}
+
+async fn read_tshock_player_list(
+	http_client: &reqwest::Client,
+	tshock_url: &reqwest::Url,
+	tshock_token: &String,
+) -> Result<PlayerList, reqwest::Error> {
+	Ok(http_client
+		.get(tshock_url.join("v2/players/list").unwrap())
+		.query(&[("token", tshock_token.as_str())])
+		.send()
+		.await?
+		.json::<PlayerList>()
+		.await?)
+}
+
 #[async_trait]
 impl EventHandler for Handler {
 	async fn ready(&self, ctx: Context, _data_about_bot: Ready) {
+		println!("Discord connection successful!");
+
 		let tshock_url = self.tshock_url.clone();
 		let http_client = self.http_client.clone();
 		let tshock_token = self.tshock_token.clone();
@@ -39,52 +70,58 @@ impl EventHandler for Handler {
 
 		tokio::spawn(async move {
 			// Query the current max player count and world name
-			// TODO: better error handling
-			let status = http_client
-				.get(tshock_url.join("v2/server/status").unwrap())
-				.query(&[("token", tshock_token.as_str())])
-				.send()
-				.await
-				.unwrap()
-				.json::<WorldStatus>()
-				.await
-				.unwrap();
+			println!("Attempting to connect to TShock");
+			let status = (|| async {
+				match check_tshock_status(&http_client, &tshock_url, &tshock_token).await {
+					Ok(status) => Ok(status),
+					Err(err) => {
+						eprintln!("Failed to check TShock server status: {}", err);
+						Err(err.into())
+					}
+				}
+			})
+			.retry(ExponentialBackoff {
+				max_elapsed_time: None,
+				..ExponentialBackoff::default()
+			})
+			.await
+			.unwrap();
 			let mut player_list = HashSet::new();
 			let mut removed_players = vec![];
 
-			// Every 20 seconds...
-			// TODO: make this configurable
-			let mut interval = tokio::time::interval(Duration::from_secs(20));
-			let mut first_run = true;
+			let mut displayed_player_count = None;
 			loop {
 				// Query the current player list, send messages when players leave/join
-				// TODO: better error handling
-				let new_player_list = http_client
-					.get(tshock_url.join("v2/players/list").unwrap())
-					.query(&[("token", tshock_token.as_str())])
-					.send()
-					.await
-					.unwrap()
-					.json::<PlayerList>()
-					.await
-					.unwrap();
-
-				let mut list_changed = false;
+				let new_player_list = (|| async {
+					match read_tshock_player_list(&http_client, &tshock_url, &tshock_token).await {
+						Ok(player_list) => Ok(player_list),
+						Err(err) => {
+							eprintln!("Failed to check TShock player list: {}", err);
+							Err(err.into())
+						}
+					}
+				})
+				.retry(ExponentialBackoff {
+					max_elapsed_time: None,
+					..ExponentialBackoff::default()
+				})
+				.await
+				.unwrap();
 
 				for added_player in new_player_list
 					.players
 					.iter()
 					.filter(|p| player_list.insert(p.username.clone()))
 				{
-					// TODO: better error handling
-					channel
+					if let Err(err) = channel
 						.say(
 							&ctx,
 							format!("{} joined the game", added_player.username.clone()),
 						)
 						.await
-						.unwrap();
-					list_changed = true;
+					{
+						eprintln!("Failed to send join message: {:?}", err);
+					}
 				}
 
 				player_list.retain(|player_name| {
@@ -100,15 +137,19 @@ impl EventHandler for Handler {
 				});
 
 				for removed_player_name in removed_players.drain(..) {
-					// TODO: better error handling
-					channel
+					if let Err(err) = channel
 						.say(&ctx, format!("{} left the game", removed_player_name))
 						.await
-						.unwrap();
-					list_changed = true;
+					{
+						eprintln!("Failed to send leave message: {:?}", err);
+					}
 				}
 
-				if list_changed || first_run {
+				if displayed_player_count == None
+					|| displayed_player_count != Some(player_list.len())
+				{
+					displayed_player_count = Some(player_list.len());
+
 					// Set the user activity
 					ctx.set_activity(Activity::playing(
 						format!(
@@ -120,7 +161,7 @@ impl EventHandler for Handler {
 					))
 					.await;
 					// Set the channel topic
-					channel
+					if let Err(err) = channel
 						.edit(&ctx, |ch| {
 							ch.topic(format!(
 								"{} | Players online: {}/{}",
@@ -131,11 +172,14 @@ impl EventHandler for Handler {
 							ch
 						})
 						.await
-						.unwrap();
+					{
+						eprintln!("Failed to set channel topic: {:?}", err);
+					}
 				}
 
-				first_run = false;
-				interval.tick().await;
+				// Wait 20 seconds...
+				// TODO: make this configurable
+				tokio::time::delay_for(Duration::from_secs(20)).await;
 			}
 		});
 	}
@@ -147,7 +191,8 @@ impl EventHandler for Handler {
 
 		// On every message, broadcast to Terraria
 		let username = msg.author_nick(ctx).await.unwrap_or(msg.author.name);
-		self.http_client
+		if let Err(err) = self
+			.http_client
 			.get(self.tshock_url.join("v2/server/broadcast").unwrap())
 			.query(&[
 				("token", self.tshock_token.as_str()),
@@ -155,8 +200,9 @@ impl EventHandler for Handler {
 			])
 			.send()
 			.await
-			.unwrap();
-		// TODO: handle error
+		{
+			eprintln!("Failed to broadcast message: {:?}", err);
+		}
 	}
 }
 
@@ -173,7 +219,7 @@ async fn main() {
 	let mut settings = config::Config::default();
 	settings
 		.merge(config::Environment::with_prefix("tdm"))
-		.unwrap();
+		.expect("Failed to parse environment variables");
 	settings
 		.merge(
 			config::File::with_name(
@@ -183,15 +229,22 @@ async fn main() {
 			)
 			.required(false),
 		)
-		.unwrap();
-	println!("{:?}", settings);
-	let settings: Settings = settings.try_into().unwrap();
+		.expect("Failed to read config file");
+	let settings: Settings = settings.try_into().expect("Failed to read configuration");
+
+	println!("Connecting to Discord...");
 
 	let mut client = Client::new(settings.discord_token)
 		.event_handler(Handler {
-			channel: ChannelId(settings.discord_channel.parse::<u64>().unwrap()),
+			channel: ChannelId(
+				settings
+					.discord_channel
+					.parse::<u64>()
+					.expect("Failed to parse channel ID"),
+			),
 			http_client: reqwest::Client::new(),
-			tshock_url: reqwest::Url::parse(settings.tshock_url.as_str()).unwrap(),
+			tshock_url: reqwest::Url::parse(settings.tshock_url.as_str())
+				.expect("Failed to TShock URL"),
 			tshock_token: settings.tshock_token,
 		})
 		.await
