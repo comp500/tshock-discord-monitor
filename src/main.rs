@@ -3,7 +3,7 @@ use serenity::client::{Client, Context, EventHandler};
 use serenity::model::{channel::Message, id::ChannelId, prelude::*};
 
 use backoff::{future::FutureOperation as _, ExponentialBackoff};
-use std::{collections::HashSet, env, future::Future, time::Duration};
+use std::{collections::HashSet, env, time::Duration};
 
 use serde::Deserialize;
 
