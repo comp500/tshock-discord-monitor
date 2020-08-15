@@ -206,7 +206,7 @@ async fn main() {
 	settings
 		.merge(
 			config::File::with_name(
-				env::var("CONFIG_FILE")
+				env::var("TDM_CONFIG_FILE")
 					.unwrap_or_else(|_| "tshock_discord_monitor".into())
 					.as_str(),
 			)
