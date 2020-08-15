@@ -203,15 +203,13 @@ async fn main() {
 	settings
 		.merge(config::Environment::with_prefix("tdm"))
 		.expect("Failed to parse environment variables");
+
+	let config_file = env::var("TDM_CONFIG_FILE").unwrap_or_else(|_| "tshock_discord_monitor".into());
+
+	println!("Attempting to load configuration file from {}", config_file);
+
 	settings
-		.merge(
-			config::File::with_name(
-				env::var("TDM_CONFIG_FILE")
-					.unwrap_or_else(|_| "tshock_discord_monitor".into())
-					.as_str(),
-			)
-			.required(false),
-		)
+		.merge(config::File::new(config_file.as_str(), config::FileFormat::Toml).required(false))
 		.expect("Failed to read config file");
 	let settings: Settings = settings.try_into().expect("Failed to read configuration");
 
