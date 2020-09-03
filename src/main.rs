@@ -31,9 +31,7 @@ struct PlayerList {
 }
 
 async fn check_tshock_status(
-	http_client: &reqwest::Client,
-	tshock_url: &reqwest::Url,
-	tshock_token: &String,
+	http_client: &reqwest::Client, tshock_url: &reqwest::Url, tshock_token: &String,
 ) -> Result<WorldStatus, reqwest::Error> {
 	Ok(http_client
 		.get(tshock_url.join("v2/server/status").unwrap())
@@ -45,9 +43,7 @@ async fn check_tshock_status(
 }
 
 async fn read_tshock_player_list(
-	http_client: &reqwest::Client,
-	tshock_url: &reqwest::Url,
-	tshock_token: &String,
+	http_client: &reqwest::Client, tshock_url: &reqwest::Url, tshock_token: &String,
 ) -> Result<PlayerList, reqwest::Error> {
 	Ok(http_client
 		.get(tshock_url.join("v2/players/list").unwrap())
