@@ -1,0 +1,37 @@
+name: Rust Release build
+
+on:
+  release:
+    types: [created]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: tshock-discord-monitor
+            asset_name: tshock-discord-monitor-linux-amd64
+          - os: macos-latest
+            artifact_name: tshock-discord-monitor
+            asset_name: tshock-discord-monitor-macos-amd64
+          - os: windows-latest
+            artifact_name: tshock-discord-monitor.exe
+            asset_name: tshock-discord-monitor-windows-amd64.exe
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Build project
+        run: cargo build --release --locked
+      - name: Upload binary to release
+        uses: svenstaro/upload-release-action@v1-release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/release/${{ matrix.artifact_name }}
+          asset_name: ${{ matrix.asset_name }}
+          tag: ${{ github.event.client_payload.new_version }}
