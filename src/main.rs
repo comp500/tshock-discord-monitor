@@ -3,16 +3,9 @@ use serenity::client::{Client, Context, EventHandler};
 use serenity::model::{channel::Message, id::ChannelId, prelude::*};
 
 use backoff::{future::FutureOperation as _, ExponentialBackoff};
-use std::{collections::HashSet, env, time::Duration};
+use std::{collections::HashSet, env, sync, time::Duration};
 
 use serde::Deserialize;
-
-struct Handler {
-	channel: ChannelId,
-	http_client: reqwest::Client,
-	tshock_url: reqwest::Url,
-	tshock_token: String,
-}
 
 #[derive(Debug, Deserialize)]
 struct WorldStatus {
@@ -54,45 +47,33 @@ async fn read_tshock_player_list(
 		.await?)
 }
 
+struct Handler {
+	channel: ChannelId,
+	http_client: reqwest::Client,
+	tshock_url: reqwest::Url,
+	tshock_token: String,
+	first_connection: sync::Once,
+}
+
 #[async_trait]
 impl EventHandler for Handler {
 	async fn ready(&self, ctx: Context, _data_about_bot: Ready) {
 		println!("Discord connection successful!");
 
-		let tshock_url = self.tshock_url.clone();
-		let http_client = self.http_client.clone();
-		let tshock_token = self.tshock_token.clone();
-		let channel = self.channel;
+		self.first_connection.call_once(|| {
+			let tshock_url = self.tshock_url.clone();
+			let http_client = self.http_client.clone();
+			let tshock_token = self.tshock_token.clone();
+			let channel = self.channel;
 
-		tokio::spawn(async move {
-			// Query the current max player count and world name
-			println!("Attempting to connect to TShock");
-			let status = (|| async {
-				match check_tshock_status(&http_client, &tshock_url, &tshock_token).await {
-					Ok(status) => Ok(status),
-					Err(err) => {
-						eprintln!("Failed to check TShock server status: {}", err);
-						Err(err.into())
-					}
-				}
-			})
-			.retry(ExponentialBackoff {
-				max_elapsed_time: None,
-				..ExponentialBackoff::default()
-			})
-			.await
-			.unwrap();
-			let mut player_list = HashSet::new();
-			let mut removed_players = vec![];
-
-			let mut displayed_player_count = None;
-			loop {
-				// Query the current player list, send messages when players leave/join
-				let new_player_list = (|| async {
-					match read_tshock_player_list(&http_client, &tshock_url, &tshock_token).await {
-						Ok(player_list) => Ok(player_list),
+			tokio::spawn(async move {
+				// Query the current max player count and world name
+				println!("Attempting to connect to TShock");
+				let status = (|| async {
+					match check_tshock_status(&http_client, &tshock_url, &tshock_token).await {
+						Ok(status) => Ok(status),
 						Err(err) => {
-							eprintln!("Failed to check TShock player list: {}", err);
+							eprintln!("Failed to check TShock server status: {}", err);
 							Err(err.into())
 						}
 					}
@@ -103,63 +84,85 @@ impl EventHandler for Handler {
 				})
 				.await
 				.unwrap();
+				let mut player_list = HashSet::new();
+				let mut removed_players = vec![];
 
-				for added_player in new_player_list
-					.players
-					.iter()
-					.filter(|p| player_list.insert(p.username.clone()))
-				{
-					if let Err(err) = channel
-						.say(&ctx, format!("{} joined the game", added_player.username.clone()))
-						.await
+				let mut displayed_player_count = None;
+				loop {
+					// Query the current player list, send messages when players leave/join
+					let new_player_list = (|| async {
+						match read_tshock_player_list(&http_client, &tshock_url, &tshock_token).await {
+							Ok(player_list) => Ok(player_list),
+							Err(err) => {
+								eprintln!("Failed to check TShock player list: {}", err);
+								Err(err.into())
+							}
+						}
+					})
+					.retry(ExponentialBackoff {
+						max_elapsed_time: None,
+						..ExponentialBackoff::default()
+					})
+					.await
+					.unwrap();
+
+					for added_player in new_player_list
+						.players
+						.iter()
+						.filter(|p| player_list.insert(p.username.clone()))
 					{
-						eprintln!("Failed to send join message: {:?}", err);
+						if let Err(err) = channel
+							.say(&ctx, format!("{} joined the game", added_player.username.clone()))
+							.await
+						{
+							eprintln!("Failed to send join message: {:?}", err);
+						}
 					}
+
+					player_list.retain(|player_name| {
+						if !new_player_list.players.iter().any(|new_p| new_p.username == *player_name) {
+							removed_players.push(player_name.clone());
+							return false;
+						}
+						true
+					});
+
+					for removed_player_name in removed_players.drain(..) {
+						if let Err(err) = channel.say(&ctx, format!("{} left the game", removed_player_name)).await {
+							eprintln!("Failed to send leave message: {:?}", err);
+						}
+					}
+
+					if displayed_player_count == None || displayed_player_count != Some(player_list.len()) {
+						displayed_player_count = Some(player_list.len());
+
+						// Set the user activity
+						ctx.set_activity(Activity::playing(
+							format!("Terraria: {}/{} online", player_list.len(), status.maxplayers).as_str(),
+						))
+						.await;
+						// Set the channel topic
+						if let Err(err) = channel
+							.edit(&ctx, |ch| {
+								ch.topic(format!(
+									"{} | Players online: {}/{}",
+									status.world,
+									player_list.len(),
+									status.maxplayers
+								));
+								ch
+							})
+							.await
+						{
+							eprintln!("Failed to set channel topic: {:?}", err);
+						}
+					}
+
+					// Wait 20 seconds...
+					// TODO: make this configurable
+					tokio::time::delay_for(Duration::from_secs(20)).await;
 				}
-
-				player_list.retain(|player_name| {
-					if !new_player_list.players.iter().any(|new_p| new_p.username == *player_name) {
-						removed_players.push(player_name.clone());
-						return false;
-					}
-					true
-				});
-
-				for removed_player_name in removed_players.drain(..) {
-					if let Err(err) = channel.say(&ctx, format!("{} left the game", removed_player_name)).await {
-						eprintln!("Failed to send leave message: {:?}", err);
-					}
-				}
-
-				if displayed_player_count == None || displayed_player_count != Some(player_list.len()) {
-					displayed_player_count = Some(player_list.len());
-
-					// Set the user activity
-					ctx.set_activity(Activity::playing(
-						format!("Terraria: {}/{} online", player_list.len(), status.maxplayers).as_str(),
-					))
-					.await;
-					// Set the channel topic
-					if let Err(err) = channel
-						.edit(&ctx, |ch| {
-							ch.topic(format!(
-								"{} | Players online: {}/{}",
-								status.world,
-								player_list.len(),
-								status.maxplayers
-							));
-							ch
-						})
-						.await
-					{
-						eprintln!("Failed to set channel topic: {:?}", err);
-					}
-				}
-
-				// Wait 20 seconds...
-				// TODO: make this configurable
-				tokio::time::delay_for(Duration::from_secs(20)).await;
-			}
+			});
 		});
 	}
 
@@ -217,6 +220,7 @@ async fn main() {
 			http_client: reqwest::Client::new(),
 			tshock_url: reqwest::Url::parse(settings.tshock_url.as_str()).expect("Failed to TShock URL"),
 			tshock_token: settings.tshock_token,
+			first_connection: sync::Once::new(),
 		})
 		.await
 		.expect("Error creating client");
