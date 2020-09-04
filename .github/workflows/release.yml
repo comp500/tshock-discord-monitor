@@ -16,13 +16,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: tshock-discord-monitor
+            artifact_name: tshock_discord_monitor
             asset_name: tshock-discord-monitor-linux-amd64
           - os: macos-latest
-            artifact_name: tshock-discord-monitor
+            artifact_name: tshock_discord_monitor
             asset_name: tshock-discord-monitor-macos-amd64
           - os: windows-latest
-            artifact_name: tshock-discord-monitor.exe
+            artifact_name: tshock_discord_monitor.exe
             asset_name: tshock-discord-monitor-windows-amd64.exe
     steps:
       - name: Checkout code
