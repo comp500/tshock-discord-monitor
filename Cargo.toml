@@ -1,6 +1,6 @@
 [package]
 name = "tshock_discord_monitor"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["comp500"]
 edition = "2018"
 description = "A discord bot that uses the TShock REST API to show player count and forward messages Discord -> Terraria"
